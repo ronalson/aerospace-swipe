@@ -41,7 +41,7 @@ static void switch_workspace(const char* ws)
 		free(result);
 	}
 
-	if (g_config.haptic == true)
+	if (g_config.haptic && g_haptic)
 		haptic_actuate(g_haptic, 3);
 }
 
@@ -361,10 +361,10 @@ int main(int argc, const char* argv[])
 			exit(EXIT_FAILURE);
 		}
 
-		if (g_config.haptic && !(g_haptic = haptic_open_default())) {
-			fprintf(stderr, "Error: Failed to initialize haptic actuator.\n");
-			aerospace_close(g_aerospace);
-			exit(EXIT_FAILURE);
+		if (g_config.haptic) {
+			g_haptic = haptic_open_default();
+			if (!g_haptic)
+				fprintf(stderr, "Warning: Failed to initialize haptic actuator. Continuing without haptics.\n");
 		}
 
 		g_tracks = CFDictionaryCreateMutable(NULL, 0,
