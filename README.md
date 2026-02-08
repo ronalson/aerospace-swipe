@@ -28,24 +28,69 @@ config file is optional and only needed if you want to change the default settin
 }
 ```
 
-## installation
-### script
-```bash
-curl -sSL https://raw.githubusercontent.com/acsandmann/aerospace-swipe/main/install.sh | bash
-```
-### manual
-   ```bash
-   git clone https://github.com/acsandmann/aerospace-swipe.git
-   cd aerospace-swipe
+## secure local install (recommended)
 
-   make install # installs a launchd service
-   ```
-## uninstallation
-### script
+this workflow is recommended for local hardening because you build from source and avoid `curl | bash`.
+
+### prerequisites
 ```bash
-curl -sSL https://raw.githubusercontent.com/acsandmann/aerospace-swipe/main/uninstall.sh | bash
+xcode-select -p
+clang --version
+make --version
 ```
-### manual
+
+if `xcode-select -p` fails:
+```bash
+xcode-select --install
+```
+
+### build and install from source
+```bash
+git clone https://github.com/<your-user>/aerospace-swipe.git
+cd aerospace-swipe
+
+make clean
+make all
+make bundle
+make install
+```
+
+what `make install` does:
+- installs/updates `AerospaceSwipe.app`
+- writes `~/Library/LaunchAgents/com.acsandmann.swipe.plist`
+- loads the launch agent in your user session
+
+### verify install
+```bash
+launchctl list | grep com.acsandmann.swipe
+ls -l /tmp/swipe.out /tmp/swipe.err
+tail -n 100 /tmp/swipe.err
+```
+
+### debug/hardening builds
+```bash
+make debug
+make sanitize
+```
+
+## quick start
+1. ensure [aerospace](https://github.com/nikitabobko/AeroSpace) is running.
+2. grant Accessibility permission when prompted.
+3. test a 3-finger swipe.
+
+if the app reports socket connection failure, start/restart aerospace first, then run:
+```bash
+make restart
+```
+
+## uninstall
 ```bash
 make uninstall
+```
+
+## optional convenience scripts (less secure workflow)
+for convenience only (not recommended for hardened setups):
+```bash
+curl -sSL https://raw.githubusercontent.com/acsandmann/aerospace-swipe/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/acsandmann/aerospace-swipe/main/uninstall.sh | bash
 ```

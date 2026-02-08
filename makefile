@@ -1,8 +1,14 @@
 CC = clang
-CFLAGS = -std=c99 -O3 -march=native -flto -fomit-frame-pointer -funroll-loops -g -Wall -Wextra -Wno-pointer-integer-compare -Wno-incompatible-pointer-types-discards-qualifiers -Wno-absolute-value -fobjc-arc
+CFLAGS_BASE = -std=c99 -Wall -Wextra -Wno-pointer-integer-compare -Wno-incompatible-pointer-types-discards-qualifiers -Wno-absolute-value -fobjc-arc
+CFLAGS_RELEASE = $(CFLAGS_BASE) -O3 -march=native -flto -fomit-frame-pointer -funroll-loops -g
+CFLAGS_DEBUG = $(CFLAGS_BASE) -O0 -g3 -fstack-protector-strong -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 -fno-omit-frame-pointer
+CFLAGS_SANITIZE = $(CFLAGS_DEBUG) -fsanitize=address,undefined -fno-sanitize-recover=all
 FRAMEWORKS = -framework CoreFoundation -framework IOKit -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Cocoa
 LDLIBS = -ldl
+CFLAGS ?= $(CFLAGS_RELEASE)
 TARGET = swipe
+DEBUG_TARGET = swipe-debug
+SANITIZE_TARGET = swipe-sanitize
 
 LAUNCH_AGENTS_DIR = $(HOME)/Library/LaunchAgents
 PLIST_FILE = com.acsandmann.swipe.plist
@@ -19,7 +25,7 @@ INFO_PLIST = $(APP_CONTENTS)/Info.plist
 
 ABS_TARGET_PATH = $(shell pwd)/$(APP_MACOS)/$(BINARY_NAME)
 
-.PHONY: all clean sign install_plist load_plist uninstall_plist install uninstall
+.PHONY: all debug sanitize clean sign install_plist load_plist uninstall_plist install uninstall
 
 ifeq ($(shell uname -sm),Darwin arm64)
 	ARCH= -arch arm64
@@ -59,6 +65,16 @@ all: $(TARGET)
 $(TARGET): $(SRC_FILES)
 	$(CC) $(CFLAGS) $(ARCH) -o $(TARGET) $(SRC_FILES) $(FRAMEWORKS) $(LDLIBS)
 
+debug: $(DEBUG_TARGET)
+
+$(DEBUG_TARGET): $(SRC_FILES)
+	$(CC) $(CFLAGS_DEBUG) $(ARCH) -o $(DEBUG_TARGET) $(SRC_FILES) $(FRAMEWORKS) $(LDLIBS)
+
+sanitize: $(SANITIZE_TARGET)
+
+$(SANITIZE_TARGET): $(SRC_FILES)
+	$(CC) $(CFLAGS_SANITIZE) $(ARCH) -o $(SANITIZE_TARGET) $(SRC_FILES) $(FRAMEWORKS) $(LDLIBS)
+
 sign: $(TARGET)
 	@echo "Signing $(TARGET) with accessibility entitlement..."
 	codesign --entitlements accessibility.entitlements --sign - $(TARGET)
@@ -93,4 +109,4 @@ format:
 	clang-format -i -- **/**.c **/**.h **/**.m
 
 clean:
-	rm -rf $(TARGET) $(APP_BUNDLE)
+	rm -rf $(TARGET) $(DEBUG_TARGET) $(SANITIZE_TARGET) $(APP_BUNDLE) $(TARGET).dSYM $(DEBUG_TARGET).dSYM $(SANITIZE_TARGET).dSYM

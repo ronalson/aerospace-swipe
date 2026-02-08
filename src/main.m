@@ -15,6 +15,17 @@ static pthread_mutex_t g_gesture_mutex = PTHREAD_MUTEX_INITIALIZER;
 static gesture_ctx g_gesture_ctx = { 0 };
 static CFMutableDictionaryRef g_tracks = NULL;
 
+static int bounded_touch_count(int count)
+{
+	if (count < 0)
+		return 0;
+	if (count > MAX_TOUCHES) {
+		fprintf(stderr, "Warning: Received %d touches, clamping to MAX_TOUCHES=%d.\n", count, MAX_TOUCHES);
+		return MAX_TOUCHES;
+	}
+	return count;
+}
+
 static void switch_workspace(const char* ws)
 {
 	if (g_config.skip_empty || g_config.wrap_around) {
@@ -191,33 +202,34 @@ static void gestureCallback(touch* touches, int count)
 	pthread_mutex_lock(&g_gesture_mutex);
 
 	gesture_ctx* ctx = &g_gesture_ctx;
+	int safe_count = bounded_touch_count(count);
 
 	if (ctx->state == GS_COMMITTED) {
-		if (handle_committed_state(ctx, touches, count))
+		if (handle_committed_state(ctx, touches, safe_count))
 			goto unlock;
 	}
 
-	if (count != g_config.fingers) {
+	if (safe_count != g_config.fingers) {
 		if (ctx->state == GS_ARMED)
 			ctx->state = GS_IDLE;
 
-		for (int i = 0; i < count; ++i)
+		for (int i = 0; i < safe_count; ++i)
 			ctx->prev_x[i] = ctx->base_x[i] = touches[i].x;
 
 		goto unlock;
 	}
 
 	float avg_x, avg_y, avg_vel, min_x, max_x, min_y, max_y;
-	calculate_touch_averages(touches, count, &avg_x, &avg_y, &avg_vel,
+	calculate_touch_averages(touches, safe_count, &avg_x, &avg_y, &avg_vel,
 		&min_x, &max_x, &min_y, &max_y);
 
 	if (ctx->state == GS_IDLE) {
-		handle_idle_state(ctx, touches, count, avg_x, avg_y, avg_vel);
+		handle_idle_state(ctx, touches, safe_count, avg_x, avg_y, avg_vel);
 	} else if (ctx->state == GS_ARMED) {
-		handle_armed_state(ctx, touches, count, avg_x, avg_y, avg_vel);
+		handle_armed_state(ctx, touches, safe_count, avg_x, avg_y, avg_vel);
 	}
 
-	for (int i = 0; i < count; ++i) {
+	for (int i = 0; i < safe_count; ++i) {
 		ctx->prev_x[i] = touches[i].x;
 		if (ctx->state == GS_IDLE)
 			ctx->base_x[i] = touches[i].x;
@@ -266,7 +278,7 @@ static CGEventRef key_handler(__unused CGEventTapProxy proxy, CGEventType type,
 		return event;
 	}
 
-	if (type != NSEventTypeGesture)
+	if (type != (CGEventType)NSEventTypeGesture)
 		return event;
 
 	NSEvent* ev = [NSEvent eventWithCGEvent:event];

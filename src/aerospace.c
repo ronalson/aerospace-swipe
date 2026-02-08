@@ -8,7 +8,6 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <sys/un.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include "aerospace.h"
@@ -20,12 +19,11 @@ static const char* ERROR_SOCKET_CREATE = "Failed to create Unix domain socket";
 static const char* ERROR_SOCKET_RECEIVE = "Failed to receive data from socket";
 static const char* ERROR_SOCKET_CLOSE = "Failed to close socket connection";
 static const char* ERROR_JSON_PRINT = "Failed to print JSON to string";
-static const char* WARN_CLI_FALLBACK = "Warning: Failed to connect to socket at %s: %s (errno %d). Falling back to CLI.";
+static const char* ERROR_SOCKET_CONNECT = "Failed to connect to AeroSpace socket at %s: %s (errno %d)";
 
 struct aerospace {
 	int fd;
 	char* socket_path;
-	bool use_cli_fallback;
 	char read_buf[READ_BUFFER_SIZE];
 	size_t read_buf_len;
 };
@@ -74,77 +72,12 @@ static char* get_default_socket_path(void)
 	return path;
 }
 
-static char* execute_cli_command(const char* command_string)
-{
-	FILE* pipe = popen(command_string, "r");
-	if (!pipe) {
-		fatal_error("popen() failed for command '%s'", command_string);
-	}
-
-	char* output = malloc(READ_BUFFER_SIZE + 1);
-	if (!output) {
-		pclose(pipe);
-		fatal_error("Failed to allocate buffer for CLI output");
-	}
-
-	size_t nread = fread(output, 1, READ_BUFFER_SIZE, pipe);
-	output[nread] = '\0';
-
-	int status = pclose(pipe);
-	if (status != 0) {
-		if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-			fprintf(stderr, "Warning: CLI command failed with exit code %d: %s\n", WEXITSTATUS(status), command_string);
-		} else if (status == -1) {
-			fprintf(stderr, "Warning: pclose failed: %s\n", strerror(errno));
-		}
-	}
-
-	if (nread > 0 && output[nread - 1] == '\n') {
-		output[nread - 1] = '\0';
-	}
-
-	return output;
-}
-
 static char* execute_aerospace_command(aerospace* client, const char** args, int arg_count, const char* stdin_payload, const char* expected_output_field)
 {
 	if (!client || !args || arg_count == 0) {
 		errno = EINVAL;
 		fprintf(stderr, "execute_aerospace_command: Invalid arguments\n");
 		return NULL;
-	}
-
-	if (client->use_cli_fallback) {
-		size_t total_len = strlen("aerospace");
-		for (int i = 0; i < arg_count; i++) {
-			total_len += 1 + strlen(args[i]);
-		}
-
-		char* cli_command_base = malloc(total_len + 1);
-		if (!cli_command_base) {
-			fatal_error("Failed to allocate memory for CLI command");
-		}
-
-		char* p = cli_command_base;
-		p += sprintf(p, "aerospace");
-		for (int i = 0; i < arg_count; i++) {
-			p += sprintf(p, " %s", args[i]);
-		}
-
-		char* final_command;
-		if (stdin_payload && strlen(stdin_payload) > 0) {
-			const char* format = "echo '%s' | %s";
-			size_t len = snprintf(NULL, 0, format, stdin_payload, cli_command_base);
-			final_command = malloc(len + 1);
-			snprintf(final_command, len + 1, format, stdin_payload, cli_command_base);
-			free(cli_command_base);
-		} else {
-			final_command = cli_command_base;
-		}
-
-		char* result = execute_cli_command(final_command);
-		free(final_command);
-		return result;
 	}
 
 	yyjson_mut_doc* doc = yyjson_mut_doc_new(NULL);
@@ -238,7 +171,6 @@ aerospace* aerospace_new(const char* socketPath)
 {
 	aerospace* client = malloc(sizeof(aerospace));
 	client->fd = -1;
-	client->use_cli_fallback = false;
 	client->read_buf_len = 0;
 
 	if (socketPath)
@@ -265,10 +197,11 @@ aerospace* aerospace_new(const char* socketPath)
 	errno = 0;
 	if (connect(client->fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
 		int connect_errno = errno;
-		fprintf(stderr, WARN_CLI_FALLBACK, client->socket_path, strerror(connect_errno), connect_errno);
 		close(client->fd);
-		client->fd = -1;
-		client->use_cli_fallback = true;
+		free(client->socket_path);
+		free(client);
+		errno = connect_errno;
+		fatal_error(ERROR_SOCKET_CONNECT, socketPath ? socketPath : addr.sun_path, strerror(connect_errno), connect_errno);
 	}
 
 	return client;
@@ -276,7 +209,7 @@ aerospace* aerospace_new(const char* socketPath)
 
 int aerospace_is_initialized(aerospace* client)
 {
-	return (client && (client->fd >= 0 || client->use_cli_fallback));
+	return (client && client->fd >= 0);
 }
 
 void aerospace_close(aerospace* client)
